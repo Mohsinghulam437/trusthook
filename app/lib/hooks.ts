@@ -45,6 +45,13 @@ export interface RenderedHook {
   id: HookId;
   icon: string;
   text: string;
+  /**
+   * ISO timestamp, only set for the sale countdown. The storefront widget
+   * turns this into a live ticking countdown and hides the badge once it
+   * passes; the server never sends a pre-formatted date, because a string
+   * rendered on the server would freeze the moment the page was cached.
+   */
+  endsAt?: string;
 }
 
 export const HOOK_DEFINITIONS: HookDefinition[] = [

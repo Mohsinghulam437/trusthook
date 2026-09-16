@@ -38,18 +38,42 @@ function randomInt(min: number, max: number, seed: number): number {
   return min + Math.floor(seededRandom(seed) * (max - min + 1));
 }
 
-const DEMO_CITIES = [
-  "New York",
-  "London",
-  "Toronto",
-  "Sydney",
-  "Berlin",
-  "Dubai",
-  "Karachi",
-  "Lahore",
-  "Manchester",
-  "Chicago",
-];
+/**
+ * How strongly each hook earns its place when more are switched on than a
+ * product page should show at once. The sale countdown outranks everything
+ * because it's the only one tied to a real deadline the merchant set; the
+ * reassurance hooks sit at the bottom because they're the least persuasive
+ * and the easiest to lose without the page feeling emptier.
+ */
+const HOOK_WEIGHT: Record<HookId, number> = {
+  saleCountdown: 100,
+  lowStock: 80,
+  freeShipping: 70,
+  recentPurchase: 55,
+  soldRecently: 50,
+  viewerCount: 45,
+  sellingFast: 40,
+  wishlistCount: 30,
+  readyToShip: 25,
+};
+
+/** Per-hook offsets so each one's jitter is independent of the others'. */
+const HOOK_JITTER_SEED: Record<HookId, number> = {
+  lowStock: 11,
+  readyToShip: 22,
+  saleCountdown: 33,
+  freeShipping: 44,
+  soldRecently: 55,
+  sellingFast: 66,
+  recentPurchase: 77,
+  viewerCount: 88,
+  wishlistCount: 99,
+};
+
+interface HookCandidate {
+  hook: RenderedHook;
+  score: number;
+}
 
 /**
  * Turns a shop's saved settings into the list of hooks to render for one
@@ -57,10 +81,23 @@ const DEMO_CITIES = [
  * stable within an hour) — this is the only place that should decide "is
  * this hook shown, and what does it say," so keep the storefront JS and
  * the liquid block dumb and keep this function the single source of truth.
+ *
+ * Note the two-step shape: build every hook the merchant switched on, then
+ * keep only the best `settings.maxHooks` of them. A merchant who turns
+ * everything on still gets a page that looks like a shop rather than a
+ * billboard, and the seeded jitter means two products in the same store
+ * don't show the identical stack of badges.
  */
 export function computeHooks(input: ComputeHooksInput): RenderedHook[] {
   const { settings, seed } = input;
-  const out: RenderedHook[] = [];
+  const candidates: HookCandidate[] = [];
+
+  const offer = (hook: RenderedHook) => {
+    // Up to ±12 of wiggle, enough for neighbouring hooks to trade places
+    // between products but not enough for a weak hook to beat a strong one.
+    const jitter = (seededRandom(seed + HOOK_JITTER_SEED[hook.id]) - 0.5) * 24;
+    candidates.push({ hook, score: HOOK_WEIGHT[hook.id] + jitter });
+  };
 
   if (settings.lowStockEnabled) {
     const maxN = Math.max(1, settings.lowStockThreshold);
@@ -69,10 +106,10 @@ export function computeHooks(input: ComputeHooksInput): RenderedHook[] {
       [`Only ${count} left in stock`, `Just ${count} remaining`],
       seed + 1,
     );
-    out.push({ id: "lowStock" as HookId, icon: "🔥", text: phrasing });
+    offer({ id: "lowStock", icon: "🔥", text: phrasing });
   } else if (settings.readyToShipEnabled) {
-    out.push({
-      id: "readyToShip" as HookId,
+    offer({
+      id: "readyToShip",
       icon: "✅",
       text: "In stock — ready to ship",
     });
@@ -81,19 +118,21 @@ export function computeHooks(input: ComputeHooksInput): RenderedHook[] {
   if (settings.saleCountdownEnabled && settings.saleEndsAt) {
     const endsAt = new Date(settings.saleEndsAt);
     if (endsAt.getTime() > Date.now()) {
-      out.push({
-        id: "saleCountdown" as HookId,
+      offer({
+        id: "saleCountdown",
         icon: "⏰",
-        // The storefront widget renders the live countdown from
-        // data-ends-at; this text is the no-JS / initial-paint fallback.
-        text: `${settings.saleMessage} ${endsAt.toISOString()}`,
+        // Only the merchant's own wording goes in `text`; the storefront
+        // widget appends a live ticking clock built from `endsAt` and hides
+        // the whole badge once the sale is over.
+        text: settings.saleMessage,
+        endsAt: endsAt.toISOString(),
       });
     }
   }
 
   if (settings.freeShippingEnabled) {
-    out.push({
-      id: "freeShipping" as HookId,
+    offer({
+      id: "freeShipping",
       icon: "🚚",
       text: settings.freeShippingMessage,
     });
@@ -101,34 +140,37 @@ export function computeHooks(input: ComputeHooksInput): RenderedHook[] {
 
   const soldCount = randomInt(2, 18, seed + 5);
   if (settings.soldRecentlyEnabled) {
-    out.push({
-      id: "soldRecently" as HookId,
+    offer({
+      id: "soldRecently",
       icon: "⚡",
       text: `${soldCount} sold in the last 24 hours`,
     });
   }
 
   if (settings.sellingFastEnabled && soldCount >= settings.sellingFastThreshold) {
-    out.push({ id: "sellingFast" as HookId, icon: "📈", text: "Selling fast" });
+    offer({ id: "sellingFast", icon: "📈", text: "Selling fast" });
   }
 
   if (settings.recentPurchaseEnabled) {
+    // No city or country names on purpose: this app is installed by stores
+    // all over the world, and naming a place the shopper has no connection
+    // to reads as obviously fake. Keep it location-free.
     const mins = randomInt(2, 55, seed + 2);
-    const city = pick(DEMO_CITIES, seed + 6);
+    const unit = mins === 1 ? "minute" : "minutes";
     const text = pick(
       [
-        `Someone in ${city} bought this ${mins} minutes ago`,
-        `Someone bought this ${mins} minutes ago`,
+        `Someone bought this ${mins} ${unit} ago`,
+        `Last ordered ${mins} ${unit} ago`,
       ],
       seed + 2,
     );
-    out.push({ id: "recentPurchase" as HookId, icon: "🛒", text });
+    offer({ id: "recentPurchase", icon: "🛒", text });
   }
 
   if (settings.viewerCountEnabled) {
     const count = 3 + Math.floor(seededRandom(seed + 3) * 20); // 3-22
-    out.push({
-      id: "viewerCount" as HookId,
+    offer({
+      id: "viewerCount",
       icon: "👀",
       text: `${count} people viewing this now`,
     });
@@ -136,14 +178,19 @@ export function computeHooks(input: ComputeHooksInput): RenderedHook[] {
 
   if (settings.wishlistCountEnabled) {
     const count = 2 + Math.floor(seededRandom(seed + 4) * 30); // 2-31
-    out.push({
-      id: "wishlistCount" as HookId,
+    offer({
+      id: "wishlistCount",
       icon: "❤️",
       text: `${count} people added this to their wishlist`,
     });
   }
 
-  return out;
+  const limit = Math.max(1, Math.min(9, settings.maxHooks));
+
+  return candidates
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((candidate) => candidate.hook);
 }
 
 /** Builds a stable per-hour seed from a product id so numbers don't

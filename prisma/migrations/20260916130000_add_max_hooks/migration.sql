@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "HookSettings" ADD COLUMN "maxHooks" INTEGER NOT NULL DEFAULT 3;

@@ -62,6 +62,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       recentPurchaseDemoMode: bool("recentPurchaseDemoMode"),
       viewerCountEnabled: bool("viewerCountEnabled"),
       wishlistCountEnabled: bool("wishlistCountEnabled"),
+      maxHooks: Math.max(1, Math.min(9, int("maxHooks", 3))),
     },
   });
 
@@ -116,6 +117,31 @@ export default function Index() {
         </s-paragraph>
 
         <fetcher.Form method="post">
+          <s-box
+            padding="base"
+            borderWidth="base"
+            borderRadius="base"
+            paddingBlockEnd="base"
+          >
+            <s-stack direction="block" gap="small">
+              <s-text type="strong">Badges shown per product</s-text>
+              <s-text color="subdued">
+                You can switch on as many hooks as you like below — this is
+                the most that will ever appear on a single product page at
+                once. The strongest ones win, and the mix varies a little
+                between products so your store doesn&apos;t look templated.
+                Three or fewer keeps it believable.
+              </s-text>
+              <s-number-field
+                name="maxHooks"
+                label="Maximum badges"
+                defaultValue={String(settings.maxHooks)}
+                min={1}
+                max={9}
+              />
+            </s-stack>
+          </s-box>
+
           <s-stack direction="block" gap="base">
             {HOOK_DEFINITIONS.map((def) => (
               <s-box

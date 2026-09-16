@@ -70,6 +70,12 @@ model HookSettings {
   viewerCountEnabled    Boolean @default(false)
   wishlistCountEnabled  Boolean @default(false)
 
+  // How many badges a single product page may show at once, no matter how
+  // many hooks are switched on above. A product plastered with eight badges
+  // reads as an app doing marketing at the shopper; two or three reads as
+  // the store telling them something. Three is the default for that reason.
+  maxHooks Int @default(3)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }

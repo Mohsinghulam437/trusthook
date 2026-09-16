@@ -1,130 +1,18 @@
-// The hook engine.
+// The hook engine — server only.
 //
-// One registry describes every hook type the app can show on a product
-// page (this is the single source of truth used by both the merchant
-// settings screen in app/routes/app._index.tsx and the storefront data
-// endpoint in app/routes/proxy.hook-data.tsx). Adding a ninth hook later
-// means adding one entry here, not touching every file that mentions hooks.
-//
-// Scope decision (deliberate, not an oversight): every number this app
-// shows is randomly generated, seeded per-product-per-hour so it doesn't
-// flicker on reload but does drift over the day. This app targets small/
-// new stores that don't have enough real traffic or order history yet for
-// "real" numbers to look convincing anyway — that's the whole point of it.
-// No Shopify Admin API calls and no order webhooks are needed at all,
-// which also means no "protected customer data" approval is required.
-// Keep every generated range plausible (a handful of viewers, single-digit
-// low-stock counts) rather than exaggerated — regulators in some markets
-// (e.g. the US FTC) have specifically gone after fake urgency/scarcity
-// claims that are wildly implausible, so "boring and believable" is the
-// safer choice, not just the more honest one.
+// The registry itself (HOOK_DEFINITIONS, HookId, …) lives in ./hooks.ts
+// because the merchant settings screen renders it in the browser. This
+// file holds the part that must never reach the client bundle: the logic
+// that decides what each shopper actually sees. Keep it that way — if a
+// component needs something from here, move that something to ./hooks.ts
+// rather than importing this file from a component (the production build
+// fails outright on a server-only import reaching client code).
 
 import type { HookSettings } from "@prisma/client";
 
-export type HookId =
-  | "lowStock"
-  | "readyToShip"
-  | "saleCountdown"
-  | "freeShipping"
-  | "soldRecently"
-  | "sellingFast"
-  | "recentPurchase"
-  | "viewerCount"
-  | "wishlistCount";
+import type { HookId, RenderedHook } from "./hooks";
 
-export type HookDataSource = "real" | "simulated";
-
-export interface HookDefinition {
-  id: HookId;
-  label: string;
-  icon: string;
-  dataSource: HookDataSource;
-  /** Shown under the toggle on the settings page. */
-  helpText: string;
-}
-
-export const HOOK_DEFINITIONS: HookDefinition[] = [
-  {
-    id: "lowStock",
-    label: "Low stock warning",
-    icon: "🔥",
-    dataSource: "simulated",
-    helpText:
-      "Shows a randomly generated low-stock number (not your real inventory) — a believable urgency cue for stores still building up traffic.",
-  },
-  {
-    id: "readyToShip",
-    label: "In stock — ready to ship",
-    icon: "✅",
-    dataSource: "simulated",
-    helpText: "A static reassurance message you can turn on any time.",
-  },
-  {
-    id: "saleCountdown",
-    label: "Sale countdown",
-    icon: "⏰",
-    dataSource: "real",
-    helpText: "Counts down to a real end time you set below.",
-  },
-  {
-    id: "freeShipping",
-    label: "Free shipping today",
-    icon: "🚚",
-    dataSource: "real",
-    helpText:
-      "A static or scheduled message you control. Only turn this on for offers that are actually running — this is a shipping promise, not decoration.",
-  },
-  {
-    id: "soldRecently",
-    label: "Sold in the last 24 hours",
-    icon: "⚡",
-    dataSource: "simulated",
-    helpText: "A randomly generated recent-sales count, not your real order data.",
-  },
-  {
-    id: "sellingFast",
-    label: "Selling fast",
-    icon: "📈",
-    dataSource: "simulated",
-    helpText:
-      "Shown once the random 24-hour count above crosses your threshold. No extra data needed once 'Sold in the last 24 hours' is on.",
-  },
-  {
-    id: "recentPurchase",
-    label: "Someone just bought this",
-    icon: "🛒",
-    dataSource: "simulated",
-    helpText: "A randomly generated recent-purchase message, not a real order.",
-  },
-  {
-    id: "viewerCount",
-    label: "People viewing this right now",
-    icon: "👀",
-    dataSource: "simulated",
-    helpText:
-      "Estimated, not measured — Shopify has no built-in concurrent-viewer tracking.",
-  },
-  {
-    id: "wishlistCount",
-    label: "Wishlist adds",
-    icon: "❤️",
-    dataSource: "simulated",
-    helpText:
-      "Estimated — Shopify has no native wishlist feature, so this number is not tracking real saves.",
-  },
-];
-
-export function getHookDefinition(id: HookId): HookDefinition {
-  const def = HOOK_DEFINITIONS.find((h) => h.id === id);
-  if (!def) throw new Error(`Unknown hook id: ${id}`);
-  return def;
-}
-
-export interface RenderedHook {
-  id: HookId;
-  icon: string;
-  text: string;
-}
+export type { HookId, RenderedHook } from "./hooks";
 
 export interface ComputeHooksInput {
   settings: HookSettings;
@@ -181,10 +69,10 @@ export function computeHooks(input: ComputeHooksInput): RenderedHook[] {
       [`Only ${count} left in stock`, `Just ${count} remaining`],
       seed + 1,
     );
-    out.push({ id: "lowStock", icon: "🔥", text: phrasing });
+    out.push({ id: "lowStock" as HookId, icon: "🔥", text: phrasing });
   } else if (settings.readyToShipEnabled) {
     out.push({
-      id: "readyToShip",
+      id: "readyToShip" as HookId,
       icon: "✅",
       text: "In stock — ready to ship",
     });
@@ -194,7 +82,7 @@ export function computeHooks(input: ComputeHooksInput): RenderedHook[] {
     const endsAt = new Date(settings.saleEndsAt);
     if (endsAt.getTime() > Date.now()) {
       out.push({
-        id: "saleCountdown",
+        id: "saleCountdown" as HookId,
         icon: "⏰",
         // The storefront widget renders the live countdown from
         // data-ends-at; this text is the no-JS / initial-paint fallback.
@@ -205,7 +93,7 @@ export function computeHooks(input: ComputeHooksInput): RenderedHook[] {
 
   if (settings.freeShippingEnabled) {
     out.push({
-      id: "freeShipping",
+      id: "freeShipping" as HookId,
       icon: "🚚",
       text: settings.freeShippingMessage,
     });
@@ -214,14 +102,14 @@ export function computeHooks(input: ComputeHooksInput): RenderedHook[] {
   const soldCount = randomInt(2, 18, seed + 5);
   if (settings.soldRecentlyEnabled) {
     out.push({
-      id: "soldRecently",
+      id: "soldRecently" as HookId,
       icon: "⚡",
       text: `${soldCount} sold in the last 24 hours`,
     });
   }
 
   if (settings.sellingFastEnabled && soldCount >= settings.sellingFastThreshold) {
-    out.push({ id: "sellingFast", icon: "📈", text: "Selling fast" });
+    out.push({ id: "sellingFast" as HookId, icon: "📈", text: "Selling fast" });
   }
 
   if (settings.recentPurchaseEnabled) {
@@ -234,13 +122,13 @@ export function computeHooks(input: ComputeHooksInput): RenderedHook[] {
       ],
       seed + 2,
     );
-    out.push({ id: "recentPurchase", icon: "🛒", text });
+    out.push({ id: "recentPurchase" as HookId, icon: "🛒", text });
   }
 
   if (settings.viewerCountEnabled) {
     const count = 3 + Math.floor(seededRandom(seed + 3) * 20); // 3-22
     out.push({
-      id: "viewerCount",
+      id: "viewerCount" as HookId,
       icon: "👀",
       text: `${count} people viewing this now`,
     });
@@ -249,7 +137,7 @@ export function computeHooks(input: ComputeHooksInput): RenderedHook[] {
   if (settings.wishlistCountEnabled) {
     const count = 2 + Math.floor(seededRandom(seed + 4) * 30); // 2-31
     out.push({
-      id: "wishlistCount",
+      id: "wishlistCount" as HookId,
       icon: "❤️",
       text: `${count} people added this to their wishlist`,
     });

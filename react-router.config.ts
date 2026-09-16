@@ -1,21 +1,33 @@
 import type { Config } from "@react-router/dev/config";
 
 export default {
-  // Shopify renders this app inside an iframe on admin.shopify.com, so every
-  // form submission (action / POST) arrives with an `origin` header of
-  // https://admin.shopify.com while `request.url` is this app's own host.
-  // React Router 7's built-in CSRF protection rejects that mismatch with a
-  // bare "400 Bad Request" (it shows up in the browser as "Application
-  // Error"), so the Shopify admin hosts have to be allowlisted here.
+  // React Router 7.18 added CSRF protection that rejects any action (POST)
+  // whose `origin` header doesn't match the app's own origin, with a bare
+  // "400 Bad Request" — which surfaces in the browser as "Application Error"
+  // and in the logs as `Error: Bad Request` thrown from `singleFetchAction`.
+  // Loaders (GET) are not checked, which is why the settings page loads fine
+  // and only saving breaks.
   //
-  // Loaders (GET) are not affected, which is why the settings page can load
-  // fine and only saving fails without this.
+  // Shopify renders embedded apps inside a sandboxed admin iframe, so form
+  // submissions arrive with an origin this app cannot predict — observed
+  // values include `https://admin.shopify.com` and the opaque `null` that a
+  // sandboxed frame sends. Allowlisting the known Shopify hosts alone was not
+  // enough (verified against the real 7.18.4 check), so the catch-all is here
+  // deliberately.
   //
-  // This does NOT apply to resource routes, so the App Proxy endpoint and the
-  // webhook routes are unaffected — they keep their own Shopify HMAC checks.
+  // Why that is acceptable *for this app specifically*: every action route
+  // calls `authenticate.admin(request)` before it touches any data, and that
+  // verifies a Shopify session token (a JWT signed with this app's client
+  // secret). A forged cross-site POST has no valid token and is rejected
+  // there. This app has no cookie-authenticated mutating endpoints, so the
+  // origin check is not the thing standing between an attacker and the data —
+  // Shopify's token is. The App Proxy and webhook routes are resource routes,
+  // which this check never applied to anyway; they keep their own HMAC checks.
   allowedActionOrigins: [
     "admin.shopify.com",
     "*.myshopify.com",
     "*.shopify.com",
+    "null",
+    "**",
   ],
 } satisfies Config;

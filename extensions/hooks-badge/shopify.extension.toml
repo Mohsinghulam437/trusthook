@@ -1,0 +1,6 @@
+# Theme App Extension — injects the hook badges as an app block merchants
+# add from the theme editor. This never touches the merchant's theme.liquid
+# or theme files directly, consistent with the "never edit theme files for
+# app-style injections" rule used for pixels/tracking on client stores.
+name = "hooks-badge"
+type = "theme"

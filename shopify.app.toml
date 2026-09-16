@@ -1,0 +1,65 @@
+# This file stores configurations for your Shopify app.
+client_id = ""
+
+[access_scopes]
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
+# Every hook number is randomly generated (see app/lib/hooks.server.ts), so
+# no inventory/order read scopes are needed. read_products is kept as a
+# minimal baseline in case a future feature needs real product context.
+scopes = "read_products"
+
+# Exposes /apps/hooks/... on the storefront, proxied to /proxy/... on this
+# server. The theme extension's JS calls this relative path so it always
+# hits the merchant's own shop domain (no CORS, no exposing this app's URL).
+# `url` must point at wherever this app is actually reachable — the `shopify
+# app dev` tunnel URL while developing, and the real deployed URL in
+# production. Update it after every `shopify app dev` restart if the tunnel
+# URL changes, and again after `shopify app deploy` once hosted for real.
+[app_proxy]
+url = "https://REPLACE_WITH_YOUR_APP_URL/proxy"
+prefix = "apps"
+subpath = "hooks"
+
+[webhooks]
+api_version = "2025-10"
+
+  # Handled by: /app/routes/webhooks.app.uninstalled.tsx
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/app/uninstalled"
+  topics = ["app/uninstalled"]
+
+  # Handled by: /app/routes/webhooks.app.scopes_update.tsx
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+  # orders/paid webhook intentionally removed: every hook number is
+  # randomly generated (app/lib/hooks.server.ts), so no order data is
+  # read, which also means no "protected customer data" approval is
+  # needed from Shopify to subscribe to this app.
+
+  # Webhooks can have filters
+  # Only receive webhooks for product updates with a product price >= 10.00
+  # See: https://shopify.dev/docs/apps/build/webhooks/customize/filters
+  # [[webhooks.subscriptions]]
+  # topics = ["products/update"]
+  # uri = "/webhooks/products/update"
+  # filter = "variants.price:>=10.00"
+
+  # Mandatory compliance topics for public apps — required for App Store
+  # submission even though this app stores no customer-identifiable data.
+  # See: https://shopify.dev/docs/apps/build/privacy-law-compliance
+  # Handled by: /app/routes/webhooks.customers.data_request.tsx
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/data_request"
+  compliance_topics = ["customers/data_request"]
+
+  # Handled by: /app/routes/webhooks.customers.redact.tsx
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/redact"
+  compliance_topics = ["customers/redact"]
+
+  # Handled by: /app/routes/webhooks.shop.redact.tsx
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/shop/redact"
+  compliance_topics = ["shop/redact"]

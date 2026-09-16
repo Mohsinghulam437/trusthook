@@ -1,0 +1,94 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
+// enough when changing adapters.
+// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
+datasource db {
+  provider = "sqlite"
+  url      = "file:dev.sqlite"
+}
+
+model Session {
+  id            String    @id
+  shop          String
+  state         String
+  isOnline      Boolean   @default(false)
+  scope         String?
+  expires       DateTime?
+  accessToken   String
+  userId        BigInt?
+  firstName     String?
+  lastName      String?
+  email         String?
+  accountOwner  Boolean   @default(false)
+  locale        String?
+  collaborator  Boolean?  @default(false)
+  emailVerified Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+}
+
+// One row per shop. Everything a merchant toggles on the "Hooks" settings
+// page lives here. Defaults are deliberately conservative: only the
+// fully-real, zero-risk hooks (low stock / ready to ship) start enabled.
+model HookSettings {
+  id      String @id @default(cuid())
+  shop    String @unique
+
+  lowStockEnabled       Boolean @default(true)
+  lowStockThreshold     Int     @default(5)
+
+  readyToShipEnabled    Boolean @default(true)
+
+  saleCountdownEnabled  Boolean  @default(false)
+  saleEndsAt            DateTime?
+  saleMessage           String   @default("Sale ends in")
+
+  freeShippingEnabled   Boolean @default(false)
+  freeShippingMessage   String  @default("Free shipping today")
+
+  soldRecentlyEnabled   Boolean @default(false)
+
+  sellingFastEnabled    Boolean @default(false)
+  sellingFastThreshold  Int     @default(10)
+
+  // "Someone just bought this" — real order data when available,
+  // demoMode must be explicitly turned on by the merchant and is always
+  // disclosed to the shopper as an example, never presented as a real sale.
+  recentPurchaseEnabled  Boolean @default(false)
+  recentPurchaseDemoMode Boolean @default(false)
+
+  // Simulated hooks. No real data source exists for these (Shopify has no
+  // native concurrent-viewer tracking or wishlist feature), so they are
+  // off by default and, when on, must be labelled as estimates in the
+  // admin UI copy — never marketed to shoppers as verified real-time data.
+  viewerCountEnabled    Boolean @default(false)
+  wishlistCountEnabled  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// One row per line item sold, written by the orders/paid webhook.
+// Powers "sold in the last 24h" and "selling fast" (both computed from a
+// rolling window over this table) and "someone just bought this" (reads
+// the latest row for the product). Only the product id and a coarse
+// city/region are stored — no customer id, name, or full address — so
+// there is nothing here that needs erasing when customers/redact fires.
+// shop/redact still deletes a shop's rows entirely when the shop closes.
+model OrderEvent {
+  id         String   @id @default(cuid())
+  shop       String
+  productId  String
+  city       String?
+  region     String?
+  occurredAt DateTime @default(now())
+
+  @@index([shop, productId, occurredAt])
+  @@index([shop, occurredAt])
+}

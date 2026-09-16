@@ -1,0 +1,72 @@
+{%- comment -%}
+  Product-page hooks block. Merchant adds this from Online Store → Themes →
+  Customize → Product page → Add block. Renders a container with the
+  current product/variant id; hook-badge.js fetches the actual hook text
+  from this app's App Proxy endpoint (/apps/hooks/hook-data) and fills it
+  in client-side, so the badges always reflect live inventory/order data
+  rather than whatever was true when the page was cached.
+
+  No Liquid metafield/JSON parsing traps apply here (unlike client theme
+  work) since this block reads nothing but the two ids below — all real
+  logic lives server-side in app/lib/hooks.server.ts.
+{%- endcomment -%}
+
+{%- assign pad_top = block.settings.pad_top | default: 16 -%}
+{%- assign pad_bottom = block.settings.pad_bottom | default: 16 -%}
+{%- assign text_scale = block.settings.text_scale | default: 100 -%}
+
+<div
+  class="hooks-badge-list"
+  data-hooks-badge
+  data-product-id="{{ product.id }}"
+  data-variant-id="{{ product.selected_or_first_available_variant.id }}"
+  data-shop-domain="{{ shop.permanent_domain }}"
+  style="padding-top: {{ pad_top }}px; padding-bottom: {{ pad_bottom }}px; --hooks-text-scale: {{ text_scale }}%;"
+  hidden
+>
+</div>
+
+{% schema %}
+{
+  "name": "Hooks",
+  "target": "section",
+  "javascript": "hook-badge.js",
+  "stylesheet": "hook-badge.css",
+  "settings": [
+    {
+      "type": "header",
+      "content": "Spacing & size"
+    },
+    {
+      "type": "range",
+      "id": "pad_top",
+      "min": 0,
+      "max": 160,
+      "step": 4,
+      "default": 16,
+      "label": "Top padding",
+      "unit": "px"
+    },
+    {
+      "type": "range",
+      "id": "pad_bottom",
+      "min": 0,
+      "max": 160,
+      "step": 4,
+      "default": 16,
+      "label": "Bottom padding",
+      "unit": "px"
+    },
+    {
+      "type": "range",
+      "id": "text_scale",
+      "min": 80,
+      "max": 140,
+      "step": 5,
+      "default": 100,
+      "label": "Text size",
+      "unit": "%"
+    }
+  ]
+}
+{% endschema %}

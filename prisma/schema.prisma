@@ -63,7 +63,6 @@ model HookSettings {
 
   viewerCountEnabled    Boolean @default(false)
   wishlistCountEnabled  Boolean @default(false)
-  maxHooks Int @default(3)
 
   // How many badges a single product page may show at once, no matter how
   // many hooks are switched on above. A product plastered with eight badges
@@ -75,7 +74,7 @@ model HookSettings {
   updatedAt DateTime @updatedAt
 }
 
-// Written by the orders/paid webhook when real order data is ever wired up.
+// Written by the orders/paid webhook if real order data is ever wired up.
 // Unused today (every number is generated), kept for a future "real data"
 // tier. Only a product id and a coarse city/region — no customer id, name
 // or full address.

@@ -7,6 +7,13 @@
 // component needs something from here, move that something to ./hooks.ts
 // rather than importing this file from a component (the production build
 // fails outright on a server-only import reaching client code).
+//
+// Nothing in here invents a number. Every value arrives as an argument,
+// measured somewhere real: `inventoryQuantity` from Shopify's Admin API,
+// `viewerCount` from rows this app wrote when browsers actually loaded the
+// page. If a value is missing, the hook is omitted rather than guessed —
+// that omission is the whole compliance story, so don't "helpfully" add a
+// fallback number to any branch below.
 
 import type { HookSettings } from "@prisma/client";
 
@@ -16,9 +23,56 @@ export type { HookId, RenderedHook } from "./hooks";
 
 export interface ComputeHooksInput {
   settings: HookSettings;
-  /** A stable per-request seed (e.g. derived from product id + hour) so
-   * simulated numbers and rotating copy don't flicker on every reload. */
+  /**
+   * Real quantity for the variant being viewed (or the product total when
+   * no variant is specified). `null` means "unknown" — the product doesn't
+   * track inventory, or the API call failed — and both inventory hooks are
+   * skipped in that case.
+   */
+  inventoryQuantity: number | null;
+  /** Distinct browsers with this product page open in the last few minutes. */
+  viewerCount: number;
+  /**
+   * A stable per-product seed, used ONLY to vary wording and ordering —
+   * never to produce a number a shopper reads as a fact.
+   */
   seed: number;
+}
+
+/**
+ * How strongly each hook earns its place when more are switched on than a
+ * product page should show at once. The sale countdown outranks everything
+ * because it's the only one tied to a deadline the merchant set; ready-to-
+ * ship sits at the bottom because it's the least persuasive and the easiest
+ * to lose without the page feeling emptier.
+ */
+const HOOK_WEIGHT: Record<HookId, number> = {
+  saleCountdown: 100,
+  lowStock: 80,
+  freeShipping: 70,
+  viewerCount: 45,
+  readyToShip: 25,
+};
+
+/** Per-hook offsets so each one's jitter is independent of the others'. */
+const HOOK_JITTER_SEED: Record<HookId, number> = {
+  lowStock: 11,
+  readyToShip: 22,
+  saleCountdown: 33,
+  freeShipping: 44,
+  viewerCount: 55,
+};
+
+/**
+ * Below this, the viewer count is not worth showing. One viewer is the
+ * shopper themselves, and telling someone "1 person is viewing this" is
+ * both useless and faintly absurd.
+ */
+const MIN_VIEWERS_TO_SHOW = 2;
+
+interface HookCandidate {
+  hook: RenderedHook;
+  score: number;
 }
 
 /** Deterministic 0..1 pseudo-random value from an integer seed (mulberry32). */
@@ -34,62 +88,19 @@ function pick<T>(items: T[], seed: number): T {
   return items[idx];
 }
 
-function randomInt(min: number, max: number, seed: number): number {
-  return min + Math.floor(seededRandom(seed) * (max - min + 1));
-}
-
 /**
- * How strongly each hook earns its place when more are switched on than a
- * product page should show at once. The sale countdown outranks everything
- * because it's the only one tied to a real deadline the merchant set; the
- * reassurance hooks sit at the bottom because they're the least persuasive
- * and the easiest to lose without the page feeling emptier.
- */
-const HOOK_WEIGHT: Record<HookId, number> = {
-  saleCountdown: 100,
-  lowStock: 80,
-  freeShipping: 70,
-  recentPurchase: 55,
-  soldRecently: 50,
-  viewerCount: 45,
-  sellingFast: 40,
-  wishlistCount: 30,
-  readyToShip: 25,
-};
-
-/** Per-hook offsets so each one's jitter is independent of the others'. */
-const HOOK_JITTER_SEED: Record<HookId, number> = {
-  lowStock: 11,
-  readyToShip: 22,
-  saleCountdown: 33,
-  freeShipping: 44,
-  soldRecently: 55,
-  sellingFast: 66,
-  recentPurchase: 77,
-  viewerCount: 88,
-  wishlistCount: 99,
-};
-
-interface HookCandidate {
-  hook: RenderedHook;
-  score: number;
-}
-
-/**
- * Turns a shop's saved settings into the list of hooks to render for one
- * product view. Every number here is randomly generated (seeded so it's
- * stable within an hour) — this is the only place that should decide "is
- * this hook shown, and what does it say," so keep the storefront JS and
- * the liquid block dumb and keep this function the single source of truth.
+ * Turns a shop's saved settings plus real measurements into the list of
+ * hooks to render for one product view. This is the only place that should
+ * decide "is this hook shown, and what does it say," so keep the storefront
+ * JS and the liquid block dumb.
  *
- * Note the two-step shape: build every hook the merchant switched on, then
- * keep only the best `settings.maxHooks` of them. A merchant who turns
- * everything on still gets a page that looks like a shop rather than a
- * billboard, and the seeded jitter means two products in the same store
- * don't show the identical stack of badges.
+ * Two-step shape: build every hook that both the merchant switched on AND
+ * has real data behind it, then keep only the best `settings.maxHooks` of
+ * them. A merchant who turns everything on still gets a page that looks
+ * like a shop rather than a billboard.
  */
 export function computeHooks(input: ComputeHooksInput): RenderedHook[] {
-  const { settings, seed } = input;
+  const { settings, inventoryQuantity, viewerCount, seed } = input;
   const candidates: HookCandidate[] = [];
 
   const offer = (hook: RenderedHook) => {
@@ -99,15 +110,30 @@ export function computeHooks(input: ComputeHooksInput): RenderedHook[] {
     candidates.push({ hook, score: HOOK_WEIGHT[hook.id] + jitter });
   };
 
-  if (settings.lowStockEnabled) {
-    const maxN = Math.max(1, settings.lowStockThreshold);
-    const count = randomInt(1, maxN, seed + 1);
+  const threshold = Math.max(1, settings.lowStockThreshold);
+  const stock = inventoryQuantity;
+
+  if (
+    settings.lowStockEnabled &&
+    stock !== null &&
+    stock > 0 &&
+    stock <= threshold
+  ) {
     const phrasing = pick(
-      [`Only ${count} left in stock`, `Just ${count} remaining`],
+      [`Only ${stock} left in stock`, `Just ${stock} remaining`],
       seed + 1,
     );
     offer({ id: "lowStock", icon: "🔥", text: phrasing });
-  } else if (settings.readyToShipEnabled) {
+  }
+
+  // Never both: one is the low-stock state, the other is its opposite.
+  const showedLowStock = candidates.some((c) => c.hook.id === "lowStock");
+  if (
+    settings.readyToShipEnabled &&
+    stock !== null &&
+    !showedLowStock &&
+    stock > threshold
+  ) {
     offer({
       id: "readyToShip",
       icon: "✅",
@@ -138,54 +164,15 @@ export function computeHooks(input: ComputeHooksInput): RenderedHook[] {
     });
   }
 
-  const soldCount = randomInt(2, 18, seed + 5);
-  if (settings.soldRecentlyEnabled) {
-    offer({
-      id: "soldRecently",
-      icon: "⚡",
-      text: `${soldCount} sold in the last 24 hours`,
-    });
-  }
-
-  if (settings.sellingFastEnabled && soldCount >= settings.sellingFastThreshold) {
-    offer({ id: "sellingFast", icon: "📈", text: "Selling fast" });
-  }
-
-  if (settings.recentPurchaseEnabled) {
-    // No city or country names on purpose: this app is installed by stores
-    // all over the world, and naming a place the shopper has no connection
-    // to reads as obviously fake. Keep it location-free.
-    const mins = randomInt(2, 55, seed + 2);
-    const unit = mins === 1 ? "minute" : "minutes";
-    const text = pick(
-      [
-        `Someone bought this ${mins} ${unit} ago`,
-        `Last ordered ${mins} ${unit} ago`,
-      ],
-      seed + 2,
-    );
-    offer({ id: "recentPurchase", icon: "🛒", text });
-  }
-
-  if (settings.viewerCountEnabled) {
-    const count = 3 + Math.floor(seededRandom(seed + 3) * 20); // 3-22
+  if (settings.viewerCountEnabled && viewerCount >= MIN_VIEWERS_TO_SHOW) {
     offer({
       id: "viewerCount",
       icon: "👀",
-      text: `${count} people viewing this now`,
+      text: `${viewerCount} people viewing this now`,
     });
   }
 
-  if (settings.wishlistCountEnabled) {
-    const count = 2 + Math.floor(seededRandom(seed + 4) * 30); // 2-31
-    offer({
-      id: "wishlistCount",
-      icon: "❤️",
-      text: `${count} people added this to their wishlist`,
-    });
-  }
-
-  const limit = Math.max(1, Math.min(9, settings.maxHooks));
+  const limit = Math.max(1, Math.min(5, settings.maxHooks));
 
   return candidates
     .sort((a, b) => b.score - a.score)
@@ -193,8 +180,7 @@ export function computeHooks(input: ComputeHooksInput): RenderedHook[] {
     .map((candidate) => candidate.hook);
 }
 
-/** Builds a stable per-hour seed from a product id so numbers don't
- * change on every page reload but do drift over the course of a day. */
+/** Builds a stable per-product seed for wording and ordering variety. */
 export function seedFromProductId(productId: string): number {
   const hourBucket = Math.floor(Date.now() / (1000 * 60 * 60));
   let hash = hourBucket;

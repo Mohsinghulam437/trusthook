@@ -1,8 +1,11 @@
-// The merchant-facing settings screen — one toggle row per hook, matching
-// the layout you sketched. Every row also carries the honesty disclosure
-// for that hook (real data vs. estimate) pulled from HOOK_DEFINITIONS in
-// app/lib/hooks.server.ts, so the "simulated" label can never drift out of
-// sync between this screen and what actually renders on the storefront.
+// The merchant-facing settings screen — one toggle row per hook.
+//
+// Every row carries a badge naming where that hook's number actually comes
+// from, pulled from HOOK_DEFINITIONS in app/lib/hooks.ts. That isn't
+// decoration: this app only ships hooks backed by something true, and
+// showing the merchant the source next to the switch is what keeps that
+// promise visible. If a future hook has no honest answer to "where does
+// this number come from", it doesn't belong on this screen.
 import { useEffect, useState } from "react";
 import type {
   ActionFunctionArgs,
@@ -48,31 +51,20 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     where: { shop: session.shop },
     data: {
       lowStockEnabled: bool("lowStockEnabled"),
-      lowStockThreshold: int("lowStockThreshold", 5),
+      lowStockThreshold: Math.max(1, int("lowStockThreshold", 5)),
       readyToShipEnabled: bool("readyToShipEnabled"),
       saleCountdownEnabled: bool("saleCountdownEnabled"),
-      saleEndsAt: saleEndsAt && !Number.isNaN(saleEndsAt.getTime()) ? saleEndsAt : null,
+      saleEndsAt:
+        saleEndsAt && !Number.isNaN(saleEndsAt.getTime()) ? saleEndsAt : null,
       saleMessage: str("saleMessage", "Sale ends in"),
       freeShippingEnabled: bool("freeShippingEnabled"),
       freeShippingMessage: str("freeShippingMessage", "Free shipping today"),
-      soldRecentlyEnabled: bool("soldRecentlyEnabled"),
-      sellingFastEnabled: bool("sellingFastEnabled"),
-      sellingFastThreshold: int("sellingFastThreshold", 10),
-      recentPurchaseEnabled: bool("recentPurchaseEnabled"),
-      recentPurchaseDemoMode: bool("recentPurchaseDemoMode"),
       viewerCountEnabled: bool("viewerCountEnabled"),
-      wishlistCountEnabled: bool("wishlistCountEnabled"),
-      maxHooks: Math.max(1, Math.min(9, int("maxHooks", 3))),
+      maxHooks: Math.max(1, Math.min(5, int("maxHooks", 3))),
     },
   });
 
   return { ok: true };
-};
-
-const DISCLOSURE_LABEL: Record<string, string> = {
-  real: "Real data",
-  "real-or-demo": "Real data, with optional demo mode",
-  simulated: "Estimated — not real-time data",
 };
 
 export default function Index() {
@@ -80,18 +72,14 @@ export default function Index() {
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
 
-  // Local, uncontrolled-ish state just to enable/disable the sub-fields
-  // (threshold, message, end date) that only make sense when a hook is on.
+  // Local state only so the per-hook extra fields (threshold, message, end
+  // date) can appear and disappear with their switch.
   const [enabled, setEnabled] = useState<Record<HookId, boolean>>({
     lowStock: settings.lowStockEnabled,
     readyToShip: settings.readyToShipEnabled,
     saleCountdown: settings.saleCountdownEnabled,
     freeShipping: settings.freeShippingEnabled,
-    soldRecently: settings.soldRecentlyEnabled,
-    sellingFast: settings.sellingFastEnabled,
-    recentPurchase: settings.recentPurchaseEnabled,
     viewerCount: settings.viewerCountEnabled,
-    wishlistCount: settings.wishlistCountEnabled,
   });
 
   const isSaving = fetcher.state !== "idle";
@@ -109,125 +97,99 @@ export default function Index() {
     <s-page heading="Hooks">
       <s-section heading="Product page hooks">
         <s-paragraph>
-          Turn on the hooks you want to show on product pages. Each one
-          states whether it&apos;s built from your store&apos;s real data or
-          is an estimate — that label also appears in the storefront
-          widget&apos;s settings so you always know what a shopper is
-          seeing.
+          Every badge below is built from something real — your live
+          inventory, a date you set, your own wording, or an actual count of
+          people on the page. Nothing is invented, which is what keeps the
+          app inside Shopify&apos;s rules and keeps your shoppers&apos; trust
+          intact.
         </s-paragraph>
 
         <fetcher.Form method="post">
-          <s-box
-            padding="base"
-            borderWidth="base"
-            borderRadius="base"
-            paddingBlockEnd="base"
-          >
+          <s-box padding="base" borderWidth="base" borderRadius="base">
             <s-stack direction="block" gap="small">
               <s-text type="strong">Badges shown per product</s-text>
               <s-text color="subdued">
-                You can switch on as many hooks as you like below — this is
-                the most that will ever appear on a single product page at
-                once. The strongest ones win, and the mix varies a little
-                between products so your store doesn&apos;t look templated.
-                Three or fewer keeps it believable.
+                Switch on as many hooks as you like — this is the most that
+                will ever appear on a single product page at once. The
+                strongest ones win, and the mix varies a little between
+                products. Three or fewer keeps it believable.
               </s-text>
               <s-number-field
                 name="maxHooks"
                 label="Maximum badges"
                 defaultValue={String(settings.maxHooks)}
                 min={1}
-                max={9}
+                max={5}
               />
             </s-stack>
           </s-box>
 
-          <s-stack direction="block" gap="base">
-            {HOOK_DEFINITIONS.map((def) => (
-              <s-box
-                key={def.id}
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-              >
-                <s-stack direction="block" gap="small">
-                  <s-stack direction="inline" gap="base">
-                    <s-text>{def.icon}</s-text>
-                    <s-stack direction="block" gap="none">
-                      <s-text type="strong">{def.label}</s-text>
-                      <s-text color="subdued">{def.helpText}</s-text>
-                      <s-badge tone={def.dataSource === "simulated" ? "warning" : "success"}>
-                        {DISCLOSURE_LABEL[def.dataSource]}
-                      </s-badge>
-                    </s-stack>
-                    <s-switch
-                      name={`${def.id}Enabled`}
-                      checked={enabled[def.id] || undefined}
-                      onChange={() => toggle(def.id)}
-                    />
-                  </s-stack>
-
-                  {/* Per-hook extra settings, shown only while the hook is on. */}
-                  {def.id === "lowStock" && enabled.lowStock && (
-                    <s-number-field
-                      name="lowStockThreshold"
-                      label="Show when quantity is at or below"
-                      defaultValue={String(settings.lowStockThreshold)}
-                      min={1}
-                    />
-                  )}
-
-                  {def.id === "saleCountdown" && enabled.saleCountdown && (
+          <s-box paddingBlockStart="base">
+            <s-stack direction="block" gap="base">
+              {HOOK_DEFINITIONS.map((def) => (
+                <s-box
+                  key={def.id}
+                  padding="base"
+                  borderWidth="base"
+                  borderRadius="base"
+                >
+                  <s-stack direction="block" gap="small">
                     <s-stack direction="inline" gap="base">
-                      <s-date-field
-                        name="saleEndsAt"
-                        label="Sale ends at"
-                        defaultValue={
-                          settings.saleEndsAt
-                            ? new Date(settings.saleEndsAt)
-                                .toISOString()
-                                .slice(0, 10)
-                            : undefined
-                        }
-                      />
-                      <s-text-field
-                        name="saleMessage"
-                        label="Message prefix"
-                        defaultValue={settings.saleMessage}
-                      />
-                    </s-stack>
-                  )}
-
-                  {def.id === "freeShipping" && enabled.freeShipping && (
-                    <s-text-field
-                      name="freeShippingMessage"
-                      label="Message"
-                      defaultValue={settings.freeShippingMessage}
-                    />
-                  )}
-
-                  {def.id === "sellingFast" && enabled.sellingFast && (
-                    <s-number-field
-                      name="sellingFastThreshold"
-                      label="Show once 24h sales reach"
-                      defaultValue={String(settings.sellingFastThreshold)}
-                      min={1}
-                    />
-                  )}
-
-                  {def.id === "recentPurchase" && enabled.recentPurchase && (
-                    <s-stack direction="inline" gap="base">
+                      <s-text>{def.icon}</s-text>
+                      <s-stack direction="block" gap="none">
+                        <s-text type="strong">{def.label}</s-text>
+                        <s-text color="subdued">{def.helpText}</s-text>
+                        <s-badge tone="success">{def.source}</s-badge>
+                      </s-stack>
                       <s-switch
-                        name="recentPurchaseDemoMode"
-                        label="Demo mode for stores with no recent orders (always shown as an example)"
-                        defaultChecked={settings.recentPurchaseDemoMode || undefined}
+                        name={`${def.id}Enabled`}
+                        checked={enabled[def.id] || undefined}
+                        onChange={() => toggle(def.id)}
                       />
                     </s-stack>
-                  )}
-                </s-stack>
-              </s-box>
-            ))}
-          </s-stack>
+
+                    {def.id === "lowStock" && enabled.lowStock && (
+                      <s-number-field
+                        name="lowStockThreshold"
+                        label="Show once real stock drops to or below"
+                        defaultValue={String(settings.lowStockThreshold)}
+                        min={1}
+                      />
+                    )}
+
+                    {def.id === "saleCountdown" && enabled.saleCountdown && (
+                      <s-stack direction="inline" gap="base">
+                        <s-date-field
+                          name="saleEndsAt"
+                          label="Sale ends at"
+                          defaultValue={
+                            settings.saleEndsAt
+                              ? new Date(settings.saleEndsAt)
+                                  .toISOString()
+                                  .slice(0, 10)
+                              : undefined
+                          }
+                        />
+                        <s-text-field
+                          name="saleMessage"
+                          label="Message prefix"
+                          defaultValue={settings.saleMessage}
+                        />
+                      </s-stack>
+                    )}
+
+                    {def.id === "freeShipping" && enabled.freeShipping && (
+                      <s-text-field
+                        name="freeShippingMessage"
+                        label="Message"
+                        defaultValue={settings.freeShippingMessage}
+                      />
+                    )}
+                  </s-stack>
+                </s-box>
+              ))}
+            </s-stack>
+          </s-box>
 
           <s-box paddingBlockStart="base">
             <s-button
@@ -247,6 +209,16 @@ export default function Index() {
           product pages, add the &quot;Hooks&quot; app block to your product
           template from the theme editor (Online Store → Themes → Customize
           → Product page → Add block).
+        </s-paragraph>
+      </s-section>
+
+      <s-section slot="aside" heading="Why some badges stay hidden">
+        <s-paragraph>
+          A badge is skipped whenever the real number behind it isn&apos;t
+          there: the stock hooks stay hidden on products that don&apos;t
+          track inventory, and the viewer count stays hidden until at least
+          two people are on the page — one viewer is just the shopper
+          themselves.
         </s-paragraph>
       </s-section>
     </s-page>

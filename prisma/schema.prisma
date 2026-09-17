@@ -5,6 +5,9 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// Note that some adapters may set a maximum length for the String type by default, please ensure your strings are long
+// enough when changing adapters.
+// See https://www.prisma.io/docs/orm/reference/prisma-schema-reference#string for more information
 // Postgres, not the template's default SQLite. Render's free disk is wiped
 // on every deploy and restart, so a file-backed database silently loses
 // every merchant's settings — fine while testing, not something a paying
@@ -36,7 +39,8 @@ model Session {
 }
 
 // One row per shop. Everything a merchant toggles on the "Hooks" settings
-// page lives here.
+// page lives here. Defaults are deliberately conservative: only the
+// fully-real, zero-risk hooks (low stock / ready to ship) start enabled.
 model HookSettings {
   id      String @id @default(cuid())
   shop    String @unique
@@ -53,16 +57,26 @@ model HookSettings {
   freeShippingEnabled   Boolean @default(false)
   freeShippingMessage   String  @default("Free shipping today")
 
-  soldRecentlyEnabled   Boolean @default(false)
+  // Counted from real ProductView rows below — an actual count of distinct
+  // browsers that loaded this product page in the last few minutes, not an
+  // estimate.
+  viewerCountEnabled    Boolean @default(false)
 
-  sellingFastEnabled    Boolean @default(false)
-  sellingFastThreshold  Int     @default(10)
-
+  // --- Dormant columns -------------------------------------------------
+  // These belong to hooks cut from v1 because nothing real can back them
+  // yet: sold-in-24h and "someone just bought this" need order access
+  // (a protected-customer-data approval from Shopify), and wishlist adds
+  // would need an actual wishlist feature. Shopify's App Store rules
+  // prohibit falsifying data shown to buyers — "false purchase
+  // notifications" is called out by name — so these stay off rather than
+  // being faked. The columns remain only so `prisma db push` never has to
+  // make a destructive change on deploy; no code reads them.
+  soldRecentlyEnabled    Boolean @default(false)
+  sellingFastEnabled     Boolean @default(false)
+  sellingFastThreshold   Int     @default(10)
   recentPurchaseEnabled  Boolean @default(false)
   recentPurchaseDemoMode Boolean @default(false)
-
-  viewerCountEnabled    Boolean @default(false)
-  wishlistCountEnabled  Boolean @default(false)
+  wishlistCountEnabled   Boolean @default(false)
 
   // How many badges a single product page may show at once, no matter how
   // many hooks are switched on above. A product plastered with eight badges
@@ -74,10 +88,13 @@ model HookSettings {
   updatedAt DateTime @updatedAt
 }
 
-// Written by the orders/paid webhook if real order data is ever wired up.
-// Unused today (every number is generated), kept for a future "real data"
-// tier. Only a product id and a coarse city/region — no customer id, name
-// or full address.
+// One row per line item sold, written by the orders/paid webhook.
+// Powers "sold in the last 24h" and "selling fast" (both computed from a
+// rolling window over this table) and "someone just bought this" (reads
+// the latest row for the product). Only the product id and a coarse
+// city/region are stored — no customer id, name, or full address — so
+// there is nothing here that needs erasing when customers/redact fires.
+// shop/redact still deletes a shop's rows entirely when the shop closes.
 model OrderEvent {
   id         String   @id @default(cuid())
   shop       String
@@ -88,4 +105,25 @@ model OrderEvent {
 
   @@index([shop, productId, occurredAt])
   @@index([shop, occurredAt])
+}
+
+// One row per (shop, product, browser) for the live viewer count.
+//
+// The storefront widget sends a random token it keeps in sessionStorage,
+// so this counts distinct browsers currently on a product page rather than
+// raw requests. Rows are refreshed on each view and pruned after a few
+// minutes, so nothing here is long-lived and nothing identifies a person:
+// no customer id, no IP, no name. That is deliberate — it keeps the viewer
+// count genuinely real without turning the app into something that needs a
+// protected-customer-data approval.
+model ProductView {
+  id        String   @id @default(cuid())
+  shop      String
+  productId String
+  visitorId String
+  viewedAt  DateTime @default(now())
+
+  @@unique([shop, productId, visitorId])
+  @@index([shop, productId, viewedAt])
+  @@index([viewedAt])
 }
